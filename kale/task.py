@@ -1,9 +1,18 @@
 """Module containing the base class for tasks."""
 from __future__ import absolute_import
 
+import errno
 import logging
+import os
+import signal
+import sys
 import time
 import uuid
+from multiprocessing import Pool, TimeoutError
+
+# Support pickling tracebacks from a subprocess.
+from tblib import pickling_support
+pickling_support.install()
 
 from kale import exceptions
 from kale import publisher
@@ -49,6 +58,9 @@ class Task(object):
     # String representation the a task queue, each task must override
     # this value.
     queue = None
+
+    # Pool to run subtasks in.
+    # _pool = Pool(1)
 
     def __init__(self, message_body=None, *args, **kwargs):
         """Initialize an instance of a task.
@@ -185,7 +197,11 @@ class Task(object):
             # This raises an exception if the task should not be attempted.
             # This enables tasks to be blacklisted by ID or type.
             self._check_blacklist(*args, **kwargs)
-            self.run_task(*args, **kwargs)
+            exc = _task_wrapper(self, args, kwargs)
+            if exc is not None:
+                raise exc
+        except TimeoutError:
+            raise exceptions.TimeoutException(os.strerror(errno.ETIME))
         except Exception as exc:
             # Record latency here.
             self._end_time = time.time()
@@ -295,3 +311,15 @@ class Task(object):
                        (failure_type, message.task_name, message.task_id,
                         exception))
         logger.error(message_str)
+
+
+def _task_wrapper(task_inst, args, kwargs):
+    # Remove SIGTERM signal handler. The parent process handles all the cleanup.
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    exception = None
+    try:
+        task_inst.run_task(*args, **kwargs)
+    except Exception as e:
+        exception = e
+        exception.exc_info = sys.exc_info()
+    return exception
