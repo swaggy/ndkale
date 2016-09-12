@@ -161,7 +161,7 @@ class TaskFailureTestCase(unittest.TestCase):
         """Task task target runtime exceeded."""
 
         task_inst = test_utils.new_mock_task(
-            task_class=test_utils.SlowButNotTooSlowTask)
+            task_class=test_utils.SlowerThanExpectedTask)
 
         with mock.patch(
                 'kale.task.Task._alert_runtime_exceeded') as time_exceeded:
