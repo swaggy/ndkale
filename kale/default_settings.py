@@ -59,3 +59,9 @@ DIE_ON_RESIDENT_SET_SIZE_MB = 256
 
 # CIPHER used by kale.crypt, must be 16-, 24-, or 36-byte string
 UTIL_CRYPT_CIPHER = '1234567890123456'
+
+# Whether to run in 'single' process mode or 'multi' process mode.
+# Multi process mode will use a seperate process to run the tasks.
+# This helps with memory usage, timeouts, and restart time.
+# This setting can be removed after multi is sufficiently tested and can be made default.
+MODE = 'single'

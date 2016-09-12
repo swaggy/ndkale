@@ -91,6 +91,9 @@ class Settings(object):
         # have been properly configured.
         self.PROPERLY_CONFIGURED = True
 
+    def is_multiprocess_mode(self):
+        return self.MODE == 'multi'
+
 
 # Instantiate the settings globally.
 settings = Settings()

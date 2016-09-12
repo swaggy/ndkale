@@ -7,6 +7,7 @@ import unittest
 from kale import exceptions
 from kale import task
 from kale import test_utils
+from kale import settings
 from six.moves import range
 
 
@@ -20,6 +21,10 @@ class TaskFailureTestCase(unittest.TestCase):
         self.addCleanup(patcher.stop)
         return patch
 
+    def setUp(self):
+        # For multi-process mode: clear subprocess pool to reload mocked methods.
+        task.Task._task_process_pool = None
+
     def testRunWorker(self):
         """Test running a task."""
         setup_env = self._create_patch(
@@ -29,8 +34,11 @@ class TaskFailureTestCase(unittest.TestCase):
         clean_env = self._create_patch(
             'kale.task.Task._clean_task_environment')
 
+        settings.MODE = 'single'
+
         task_inst = test_utils.new_mock_task(task_class=test_utils.MockTask)
         task_args = [1, 'a']
+
         task_inst.run(*task_args)
 
         setup_env.assert_called_once_with()
@@ -38,6 +46,15 @@ class TaskFailureTestCase(unittest.TestCase):
         post_run.assert_called_once_with(*task_args)
         clean_env.assert_called_once_with(
             task_id='mock_task', task_name='kale.test_utils.MockTask')
+
+    def testRunWorkerMulti(self):
+        """Test running a task in multi-process mode."""
+        settings.MODE = 'multi'
+
+        task_inst = test_utils.new_mock_task(task_class=test_utils.MockTask)
+        task_args = [1, 'a']
+
+        task_inst.run(*task_args)
 
     def testRunWorkerFailTask(self):
         """Test running a task."""
@@ -47,6 +64,8 @@ class TaskFailureTestCase(unittest.TestCase):
         post_run = self._create_patch('kale.task.Task._post_run')
         clean_env = self._create_patch(
             'kale.task.Task._clean_task_environment')
+
+        settings.MODE = 'single'
 
         task_inst = test_utils.new_mock_task(task_class=test_utils.FailTask)
         task_inst._start_time = 1
@@ -61,6 +80,20 @@ class TaskFailureTestCase(unittest.TestCase):
         clean_env.assert_called_once_with(
             task_id='fail_task', task_name='kale.test_utils.FailTask',
             exc=exc_ctxt_mngr.exception)
+        self.assertTrue(task_inst._end_time > 0)
+        self.assertTrue(task_inst._task_latency_sec > 0)
+
+    def testRunWorkerFailTaskMulti(self):
+        """Test running a task in multi-process mode."""
+        settings.MODE = 'multi'
+
+        task_inst = test_utils.new_mock_task(task_class=test_utils.FailTask)
+        task_inst._start_time = 1
+        task_args = [1, 'a']
+
+        with self.assertRaises(exceptions.TaskException):
+            task_inst.run(*task_args)
+
         self.assertTrue(task_inst._end_time > 0)
         self.assertTrue(task_inst._task_latency_sec > 0)
 
@@ -161,7 +194,7 @@ class TaskFailureTestCase(unittest.TestCase):
         """Task task target runtime exceeded."""
 
         task_inst = test_utils.new_mock_task(
-            task_class=test_utils.SlowButNotTooSlowTask)
+            task_class=test_utils.SlowerThanExpectedTask)
 
         with mock.patch(
                 'kale.task.Task._alert_runtime_exceeded') as time_exceeded:
@@ -180,6 +213,8 @@ class TaskFailureTestCase(unittest.TestCase):
         raised_exc = exceptions.BlacklistedException()
         check_blacklist.side_effect = raised_exc
 
+        settings.MODE = 'single'
+
         task_inst = test_utils.new_mock_task(task_class=test_utils.MockTask)
         task_inst._start_time = 1
         task_args = [1, 'a']
@@ -194,6 +229,21 @@ class TaskFailureTestCase(unittest.TestCase):
             task_id='mock_task', task_name='kale.test_utils.MockTask',
             exc=raised_exc)
 
+    def testBlacklistedTaskFailsMulti(self):
+        """Test that a blacklisted task raises an exception in multi-process mode."""
+        check_blacklist = self._create_patch('kale.task.Task._check_blacklist')
+        raised_exc = exceptions.BlacklistedException()
+        check_blacklist.side_effect = raised_exc
+
+        settings.MODE = 'multi'
+
+        task_inst = test_utils.new_mock_task(task_class=test_utils.MockTask)
+        task_inst._start_time = 1
+        task_args = [1, 'a']
+
+        with self.assertRaises(exceptions.BlacklistedException):
+            task_inst.run(*task_args)
+
     def testBlacklistedTaskNoRetries(self):
         """Test that a blacklisted task raises an exception."""
         setup_env = self._create_patch(
@@ -205,6 +255,8 @@ class TaskFailureTestCase(unittest.TestCase):
         check_blacklist = self._create_patch('kale.task.Task._check_blacklist')
         raised_exc = exceptions.BlacklistedException()
         check_blacklist.side_effect = raised_exc
+
+        settings.MODE = 'single'
 
         mock_message = test_utils.new_mock_message(
             task_class=test_utils.MockTask)
@@ -221,6 +273,28 @@ class TaskFailureTestCase(unittest.TestCase):
         clean_env.assert_called_once_with(
             task_id='mock_task', task_name='kale.test_utils.MockTask',
             exc=raised_exc)
+
+        # Check that task
+        permanent_failure = not task_inst.__class__.handle_failure(
+            mock_message, raised_exc)
+        self.assertTrue(permanent_failure)
+
+    def testBlacklistedTaskNoRetriesMulti(self):
+        """Test that a blacklisted task raises an exception in multi-process mode."""
+        check_blacklist = self._create_patch('kale.task.Task._check_blacklist')
+        raised_exc = exceptions.BlacklistedException()
+        check_blacklist.side_effect = raised_exc
+
+        settings.MODE = 'multi'
+
+        mock_message = test_utils.new_mock_message(
+            task_class=test_utils.MockTask)
+        task_inst = mock_message.task_inst
+        task_inst._start_time = 1
+        task_args = [1, 'a']
+
+        with self.assertRaises(exceptions.BlacklistedException):
+            task_inst.run(*task_args)
 
         # Check that task
         permanent_failure = not task_inst.__class__.handle_failure(
